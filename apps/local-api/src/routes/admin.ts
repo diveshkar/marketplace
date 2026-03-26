@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { requireAdmin } from '../middleware/require-admin.js';
 import { requireAuth } from '../middleware/require-auth.js';
-import { AdminServiceError, adminService } from '../services/admin.service.js';
+import { adminService } from '../services/admin.service.js';
 import { activityLogService } from '../services/activity-log.service.js';
 import { taxonomyService } from '../services/taxonomy.service.js';
 

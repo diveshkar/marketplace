@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { deriveImageKeys } from '../services/image.service.js';
 
 // We test deriveImageKeys directly. processAndWriteVariants depends on sharp

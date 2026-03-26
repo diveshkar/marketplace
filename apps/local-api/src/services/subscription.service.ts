@@ -1,4 +1,4 @@
-import { isDowngrade, isUpgrade, PLAN_CATALOG, type PlanInfo } from '@marketplace/shared-subscriptions';
+import { isUpgrade, PLAN_CATALOG, type PlanInfo } from '@marketplace/shared-subscriptions';
 import type { PublicUser, SubscriptionPlan } from '@marketplace/shared-types';
 import { userRepository } from '../repositories/user.repository.js';
 

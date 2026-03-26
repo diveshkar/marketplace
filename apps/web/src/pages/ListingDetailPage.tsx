@@ -100,7 +100,7 @@ export function ListingDetailPage() {
       city: listing.city,
       imageKey: listing.imageKeys?.[0],
     });
-  }, [listingId, listing]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [listingId, listing]);
 
   // Load related listings (same category, excluding this one)
   useEffect(() => {

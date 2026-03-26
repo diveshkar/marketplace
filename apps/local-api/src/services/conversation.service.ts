@@ -122,7 +122,6 @@ export const conversationService = {
     // Notify the other party
     const recipientId = isBuyer ? conv.sellerUserId : conv.buyerUserId;
     const sender = await userRepository.getById(userId);
-    const listing = await listingRepository.getById(conv.listingId);
     await notificationRepository.create({
       notificationId: randomUUID(),
       userId: recipientId,

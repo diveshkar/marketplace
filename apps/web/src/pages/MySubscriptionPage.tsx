@@ -82,7 +82,7 @@ export function MySubscriptionPage() {
     }
   }
 
-  async function handlePaymentSuccess(stripePaymentIntentId: string) {
+  async function handlePaymentSuccess(_stripePaymentIntentId: string) {
     if (!pendingUpgrade) return;
     // Payment succeeded via Stripe — webhook will activate subscription.
     // Also call upgrade endpoint for immediate activation.
