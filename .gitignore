@@ -1,0 +1,20 @@
+node_modules
+dist
+build
+.env
+.env.local
+.local
+*.log
+.DS_Store
+coverage
+.idea
+.vscode/*
+!.vscode/extensions.json
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+.terraform.tfstate.lock.info
+crash.*.log

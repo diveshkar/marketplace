@@ -1,0 +1,63 @@
+Deployment & Secrets Guide (Phase 11)
+======================================
+
+Prerequisites
+-------------
+  - AWS account with IAM role for GitHub Actions (OIDC federation recommended)
+  - S3 bucket + DynamoDB lock tables for Terraform state (see terraform/BOOTSTRAP.txt)
+  - GitHub repository with environments: staging, prod
+
+GitHub Secrets & Variables
+--------------------------
+  Per-environment secrets (Settings → Environments → <env> → Secrets):
+    AWS_DEPLOY_ROLE_ARN   — IAM role ARN for OIDC-based deploy (arn:aws:iam::ACCOUNT:role/marketplace-deploy-ENVNAME)
+
+  Per-environment variables (Settings → Environments → <env> → Variables):
+    AWS_REGION            — e.g. ap-south-1
+    API_URL               — deployed API endpoint (used by Vite at build time)
+    WEB_BUCKET            — S3 bucket for static web hosting (when using S3+CloudFront)
+    CF_DISTRIBUTION_ID    — CloudFront distribution ID (for cache invalidation)
+
+CI/CD Workflows
+---------------
+  .github/workflows/ci.yml
+    Runs on every push/PR to main: lint, typecheck (API + web), build web, Terraform validate.
+
+  .github/workflows/deploy.yml
+    Manual dispatch: choose staging or prod. Runs Terraform plan+apply, then builds and deploys app.
+    Customize the deployment steps in build-and-deploy job for your hosting choice.
+
+Environment-Specific Config
+---------------------------
+  Staging:
+    - Cognito: allow_user_password_auth = true (for testing)
+    - CloudWatch logs: 30-day retention
+    - DynamoDB: PAY_PER_REQUEST (on-demand)
+
+  Prod:
+    - Cognito: allow_user_password_auth = false (SRP only)
+    - CloudWatch logs: 90-day retention
+    - DynamoDB: PAY_PER_REQUEST (on-demand, switch to provisioned if needed)
+
+Backups & Rollback
+------------------
+  DynamoDB:
+    - Point-in-time recovery (PITR) enabled on all tables via Terraform.
+    - Restore: AWS Console → DynamoDB → Table → Backups → Restore to point in time.
+
+  Terraform:
+    - State versioned in S3 (bucket versioning recommended).
+    - Rollback: revert the commit, re-run deploy workflow. Terraform will converge to the previous state.
+    - Emergency: terraform -chdir=infra/terraform/envs/<env> apply (with reverted code).
+
+  Web (S3+CloudFront):
+    - Rollback: redeploy from a previous commit via the deploy workflow.
+    - Previous versions retained if S3 bucket versioning is enabled.
+
+Secrets Handling
+----------------
+  - NEVER commit .env files with real credentials.
+  - Use GitHub environment secrets for CI/CD (AWS_DEPLOY_ROLE_ARN).
+  - Use AWS Secrets Manager or SSM Parameter Store for runtime secrets (JWT_SECRET, etc.).
+  - Terraform outputs (Cognito IDs, table names) feed into app config; store as GitHub variables.
+  - Local development: copy .env.example → .env and fill in local values only.

@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-typecheck-build:
+    name: Lint, Typecheck & Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck API
+        run: pnpm --filter @marketplace/local-api typecheck
+
+      - name: Typecheck Web
+        run: pnpm --filter @marketplace/web typecheck
+
+      - name: Build Web
+        run: pnpm --filter @marketplace/web build
+
+  terraform-validate:
+    name: Terraform Validate
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        env: [staging, prod]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.5"
+
+      - name: Terraform Init (no backend)
+        run: terraform -chdir=infra/terraform/envs/${{ matrix.env }} init -backend=false
+
+      - name: Terraform Validate
+        run: terraform -chdir=infra/terraform/envs/${{ matrix.env }} validate
+
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive infra/terraform

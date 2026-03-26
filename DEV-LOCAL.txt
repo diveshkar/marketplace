@@ -1,0 +1,237 @@
+Local development (no AWS / Terraform deployment)
+================================================
+
+You need: Node.js, pnpm, and a .env at repo root (copy from .env.example).
+
+1) DynamoDB Local on port 8000 — pick one:
+
+   A) Docker Desktop
+      pnpm docker:up
+      (or use run-local.bat — it runs this for you)
+
+   B) No Docker — official JAR + Java
+      Set DYNAMODB_LOCAL_HOME to the folder with DynamoDBLocal.jar, then either:
+        scripts\start-dynamodb-local.bat
+      or use:
+        run-local-jar.bat
+      (opens DynamoDB in another window, then starts API + web)
+
+2) One-time per fresh database:
+      pnpm db:init
+      pnpm db:seed
+
+   Phase 3 auth: users table needs email-index GSI. If you created DB before Phase 3,
+   delete the users table in DynamoDB Local (or reset Docker volume) then run db:init again.
+
+   Try login: demo@example.local / demo12345 (from seed) or register a new user.
+   UI: /login, /register, protected /account (GET/PATCH /me).
+
+Phase 4 — listings
+   Drop/recreate listings table if it existed before userId-index (then db:init).
+   API: POST/PATCH/GET /listings, GET /listings/mine, POST .../submit, POST .../sold
+   UI when logged in: /listings, /listings/new, /listings/:id
+   Limits: DRAFT+PENDING+ACTIVE count vs plan (FREE 3, SILVER 25, GOLD 100).
+
+Phase 5 — listing images (local or S3)
+   Local (default): STORAGE_DRIVER=local. Flow: POST /listings/:id/upload-url → PUT bytes to
+   uploadUrl (local: /uploads/local with X-Upload-Token) → POST /listings/:id/upload-complete.
+   Files live under UPLOAD_DIR; browser loads them via GET /uploads/public/<key> (Vite proxies /uploads).
+   If the API returns an absolute localhost upload URL, ensure CORS allows your dev origin (already set).
+   Optional API_PUBLIC_URL when the browser cannot reach localhost:PORT (e.g. device on LAN).
+   S3: set STORAGE_DRIVER=s3, S3_BUCKET from Terraform output s3_listing_uploads_bucket_name, AWS creds/region.
+   Image caps per listing: FREE 3, SILVER 8, GOLD 15 (also enforced on PATCH imageKeys).
+   Orphan files: deleting a listing does not remove blobs in Phase 5; remove under UPLOAD_DIR or S3 manually if needed.
+
+3) Run app (if DynamoDB is already up and tables exist):
+      pnpm local:up
+   Or API + web only without db steps:
+      pnpm dev:lite
+
+URLs
+----
+  Frontend:  http://localhost:5173
+  API:       http://localhost:4000   (health: GET /health)
+
+Phase 6 — browse & search
+   GET /search?category=X&city=Y&minPrice=0&maxPrice=100 — returns ACTIVE listings (public, no auth required).
+   GET /search/facets — returns available categories and cities for filter dropdowns.
+   GET /listings/:id — now returns { listing, seller, viewer } with plan-aware masking:
+     FREE viewers: up to 2 images, no seller phone/email.
+     SILVER viewers: all images, seller phone revealed.
+     GOLD viewers: all images, seller phone + email revealed.
+   UI: /browse page with category, city, price filters + listing cards.
+   Listing detail page now shows seller info panel (masked by plan).
+   Browsing is public; logged-in users get plan-aware visibility.
+
+Phase 7 — favorites & inquiries
+   IMPORTANT: if inquiries table existed before Phase 7, delete it (DynamoDB Local reset
+   or pnpm docker:down && pnpm docker:up) then pnpm db:init to add GSIs.
+
+   Favorites (SILVER + GOLD only):
+     POST /listings/:id/favorite — add favorite
+     DELETE /listings/:id/favorite — remove favorite
+     GET /me/favorites — list my favorites (with listing summary)
+     UI: Favorite/Unfavorite button on listing detail; /me/favorites page.
+     FREE users see a note that favorites require SILVER+.
+
+   Inquiries (all plans, daily limit):
+     POST /listings/:id/inquiry { message } — send inquiry to seller
+     GET /me/inquiries — list inquiries I sent
+     Daily limits: FREE 3, SILVER 15, GOLD 50. Returns 429 when exceeded.
+     UI: Inquiry form on listing detail (not shown to listing owner or anonymous).
+     /me/inquiries page lists sent inquiries.
+
+   Navigation: Home nav now has Favorites + Inquiries links.
+
+Phase 10 — async system (event bus + notifications)
+   Architecture: local in-process EventEmitter event bus (maps to SQS/EventBridge in cloud).
+   Notification worker runs in-process, listens for domain events, writes to notifications table.
+   Events emitted:
+     INQUIRY_SENT — when a buyer sends an inquiry → notifies seller
+     LISTING_APPROVED — when admin approves a listing → notifies owner
+     LISTING_REJECTED — when admin rejects a listing → notifies owner
+     LISTING_REPORTED — when a user reports a listing → logged for admin
+   API:
+     GET /me/notifications — list user's notifications (newest first, max 50)
+     POST /me/notifications/:id/read — mark one notification as read
+     POST /me/notifications/read-all — mark all as read
+   UI: /me/notifications page with unread count, mark-read buttons.
+   IMPORTANT: if tables were created before Phase 10, reset DynamoDB Local
+   (pnpm docker:down && pnpm docker:up) then pnpm db:init to add notifications table.
+   Worker output visible in API server console (prefixed [notification-worker]).
+
+Phase 9 — admin & moderation
+   Login as admin@example.local / demo12345 (ADMIN role) to access admin features.
+   Admin-only endpoints (require ADMIN role):
+     GET /admin/listings/pending — list PENDING listings awaiting approval
+     POST /admin/listings/:id/approve — approve listing (PENDING → ACTIVE)
+     POST /admin/listings/:id/reject — reject listing (PENDING → REJECTED)
+     GET /admin/users — list all users with plan/status info
+     PATCH /admin/users/:id/status { accountStatus: ACTIVE|SUSPENDED|BLOCKED }
+     PATCH /admin/users/:id/subscription { plan } — (from Phase 8)
+     GET /admin/reports — list all reports
+     PATCH /admin/reports/:id { status: REVIEWED|DISMISSED }
+     GET /admin/stats — usage dashboard (users by plan, listings by status, open reports)
+   User-facing reporting:
+     POST /listings/:id/report { reason } — any logged-in user can report a listing
+   UI: /admin page with tabs: Dashboard, Pending Listings, Users, Reports.
+     Admin link (amber) appears in nav only for ADMIN role users.
+   Seed data includes 2 PENDING listings and 1 OPEN report for testing moderation.
+
+Phase 8 — subscription management
+   GET /subscription/plans — public plan catalog (FREE, SILVER, GOLD details).
+   GET /me/subscription — current user's plan and status (auth required).
+   POST /subscription/upgrade { plan } — upgrade to a higher plan (auth required).
+   POST /subscription/cancel — downgrade to FREE (auth required).
+   PATCH /admin/users/:userId/subscription { plan } — admin override (ADMIN role required).
+   UI: /me/subscription page with current plan badge, comparison table, upgrade/cancel buttons.
+   MVP: upgrades are instant, no billing. Cancel resets to FREE immediately.
+   Admin user seeded: admin@example.local / demo12345 (role: ADMIN, plan: GOLD).
+   Navigation: Home nav now has Subscription link for logged-in users.
+
+Phase 11 — production readiness
+   CloudWatch: Terraform module with API + worker log groups and essential alarms
+     (5xx errors, DynamoDB throttles, DynamoDB system errors).
+   DynamoDB: all 7 tables (users, listings, favorites, inquiries, reports,
+     subscriptions, notifications) now in Terraform with PITR + SSE.
+   CI/CD: .github/workflows/ci.yml (lint, typecheck, build, TF validate on push/PR)
+          .github/workflows/deploy.yml (manual dispatch: TF plan+apply, build+deploy)
+   Build scripts: pnpm typecheck, pnpm build:web added to root package.json.
+   Deployment guide: infra/DEPLOY.txt — secrets, rollback, environment config.
+
+Phase 12 — listing edit & delete
+   UI: /listings/:id/edit page with pre-filled form, PATCH /listings/:id endpoint.
+   DELETE /listings/:id — owner can delete their own listing.
+
+Phase 13 — listing categories & location taxonomy
+   Hardcoded taxonomy: categories → subcategories, provinces → districts → cities.
+   GET /taxonomy/categories, GET /taxonomy/locations — public endpoints.
+   UI: cascading dropdowns on new/edit listing and browse/search filters.
+
+Phase 14 — taxonomy integration
+   Category/subcategory/province/district fields on Listing type.
+   Search filters support subcategory, district, province, condition.
+   Browse page: full cascading filter panel.
+
+Phase 15 — messaging / chat
+   Real-time-style messaging between buyer and seller per listing.
+   Tables: conversations (with buyer/seller/listing GSIs), messages (conversationId + messageId).
+   API: POST /conversations, GET /me/conversations, GET /conversations/:id/messages,
+        POST /conversations/:id/messages, POST /conversations/:id/block.
+   UI: /me/messages page (conversation list + chat panel), /me/inbox (seller inbox).
+   "Message Seller" button on listing detail creates/opens a conversation.
+
+Phase 16 — public profiles & social features
+   GET /sellers/:userId — public seller profile with active listings.
+   POST /listings/:id/view — view counter (atomic DynamoDB increment).
+   Negotiable flag on listings (checkbox in new/edit forms).
+   Recently viewed listings (localStorage, /recently-viewed page).
+   Listing detail: share buttons (WhatsApp, Facebook, Copy Link), safety tips,
+     related/similar listings section, seller name links to profile.
+   UI: /sellers/:userId, /recently-viewed pages.
+
+Phase 17 — ad promotion & monetization
+   Simulated payment gateway (swap for Stripe in Phase 18).
+   Promotion types: BUMP (Rs 150, instant), FEATURED (Rs 500, 7 days), TOP_AD (Rs 1,000, 14 days).
+   Subscription upgrades with payment: SILVER Rs 999/mo, GOLD Rs 1,999/mo.
+   Tables: promotions (with userId/listingId GSIs), payments (with userId GSI).
+   API: GET /promotions/plans, GET /promotions/subscription-plans,
+        POST /promotions/purchase, POST /promotions/upgrade-subscription,
+        GET /me/promotions, GET /me/payments.
+   Search boost: promoted listings sort first (TOP_AD > FEATURED > BUMP).
+   Promotion badges on listing cards and detail page.
+   PaymentModal component: card form (simulated) or bank transfer option.
+   UI: /me/promote, /me/upgrade, /me/billing pages.
+   Subscription page (/me/subscription) now goes through payment modal.
+   IMPORTANT: if tables were created before Phase 17, reset DynamoDB Local
+   (pnpm docker:down && pnpm docker:up) then pnpm db:init to add promotions + payments tables.
+
+Phase 18 — admin revamp
+   1. Admin layout — separate admin sidebar (Dashboard, Listings, Users, Reports, Categories, Settings)
+   2. Search/filter users — by name, email, plan, status
+   3. Search/filter listings — by status, category, user, date range
+   4. User detail view — click user → see their listings, inquiries, reports, subscription history
+   5. Listing preview in moderation — full listing preview with images in pending queue
+   6. Bulk actions — approve/reject multiple listings, suspend multiple users
+   7. Activity logs — track admin actions (who approved what, when)
+   8. Category management — add/edit/delete categories from admin panel
+   9. Location management — add/edit locations from admin panel
+   10. Dashboard charts — new users/day, listings/day, revenue chart
+
+Phase 19 — polish & production
+   1. SEO meta tags — title, description, OG tags per page
+   2. 404 page — proper not-found page
+   3. Error boundary — global React error boundary with fallback UI
+   4. Image optimization — thumbnail generation, lazy loading, WebP conversion
+   5. Performance — code splitting, route-based lazy loading
+   6. Accessibility — ARIA labels, keyboard navigation, focus management
+   7. Terms of service page — static legal pages
+   8. Safety tips page — buyer/seller safety guidelines
+   9. Contact/help page — support form or FAQ
+   10. PWA support — install prompt, offline indicator
+
+Phase 20 — real payment integration (Stripe)  [PLANNED — final phase]
+   Replace simulated payment gateway with Stripe Checkout.
+   Prerequisites: Stripe account, API keys (STRIPE_SECRET_KEY, STRIPE_PUBLISHABLE_KEY,
+     STRIPE_WEBHOOK_SECRET in .env).
+   Backend:
+     - Install stripe package in local-api
+     - payment.service.ts: create Stripe PaymentIntent instead of instant COMPLETED
+     - New POST /webhooks/stripe endpoint (raw body, signature verification)
+     - Payment status flow: PENDING → webhook confirms → COMPLETED or FAILED
+   Frontend:
+     - Install @stripe/stripe-js + @stripe/react-stripe-js in web
+     - PaymentModal.tsx: replace manual card form with Stripe <CardElement />
+     - PCI-compliant: card data never touches our server
+   Subscription upgrades:
+     - Stripe Checkout Session for subscription plans
+     - Optional: Stripe Customer Portal for plan management
+   Testing:
+     - Use Stripe test mode (pk_test_xxx / sk_test_xxx)
+     - Test card: 4242 4242 4242 4242
+     - Stripe CLI for local webhook testing: stripe listen --forward-to localhost:4000/webhooks/stripe
+
+Terraform / staging / prod
+--------------------------
+  Ignore until you deploy. See infra/terraform/BOOTSTRAP.txt when ready.
+  Deployment guide: infra/DEPLOY.txt.

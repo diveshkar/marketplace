@@ -1,0 +1,89 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        type: choice
+        options:
+          - staging
+          - prod
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  terraform-plan-apply:
+    name: Terraform ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.5"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'ap-south-1' }}
+
+      - name: Terraform Init
+        run: |
+          terraform -chdir=infra/terraform/envs/${{ inputs.environment }} init \
+            -backend-config=../../state/backend-${{ inputs.environment }}.hcl
+
+      - name: Terraform Plan
+        run: |
+          terraform -chdir=infra/terraform/envs/${{ inputs.environment }} plan \
+            -out=tfplan
+
+      - name: Terraform Apply
+        run: |
+          terraform -chdir=infra/terraform/envs/${{ inputs.environment }} apply tfplan
+
+  build-and-deploy:
+    name: Build & Deploy App
+    needs: terraform-plan-apply
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build Web
+        run: pnpm --filter @marketplace/web build
+        env:
+          VITE_API_URL: ${{ vars.API_URL }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'ap-south-1' }}
+
+      # Deployment steps depend on your hosting choice (S3+CloudFront, ECS, Lambda, etc.)
+      # Uncomment and customize the appropriate section when ready:
+      #
+      # - name: Deploy Web to S3
+      #   run: aws s3 sync apps/web/dist s3://${{ vars.WEB_BUCKET }} --delete
+      #
+      # - name: Invalidate CloudFront
+      #   run: aws cloudfront create-invalidation --distribution-id ${{ vars.CF_DISTRIBUTION_ID }} --paths "/*"

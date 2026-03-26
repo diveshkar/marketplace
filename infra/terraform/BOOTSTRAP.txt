@@ -1,0 +1,28 @@
+Phase 2 — remote state prerequisites (PLAN_v2)
+
+Before `terraform init` with -backend-config, create in AWS (once per org/account or adjust names in infra/terraform/state/*.hcl):
+
+1) S3 bucket: company-terraform-state (versioning + SSE recommended)
+2) DynamoDB tables: terraform-locks-staging, terraform-locks-prod (PK: LockID, String)
+
+Use separate profiles for staging vs prod (e.g. AWS_PROFILE=marketplace-staging).
+
+Staging (remote state):
+  pnpm tf:init:staging
+  terraform -chdir=infra/terraform/envs/staging plan
+
+Prod (remote state):
+  pnpm tf:init:prod
+  terraform -chdir=infra/terraform/envs/prod plan
+
+Local-only init/validate (no S3 backend; install Terraform CLI first):
+  pnpm tf:init:staging:local
+  pnpm tf:validate:staging
+  pnpm tf:init:prod:local
+  pnpm tf:validate:prod
+
+Format:
+  pnpm tf:fmt
+
+Phase 3 — after apply, read Cognito outputs (user_pool_id, user_pool_client_id, issuer)
+for wiring the web app to staging/prod (Hosted UI / Amplify / custom OIDC later).

@@ -1,0 +1,38 @@
+{
+  "name": "marketplace",
+  "private": true,
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "docker:up": "docker compose -f docker/dynamodb-local/docker-compose.yml up -d",
+    "docker:down": "docker compose -f docker/dynamodb-local/docker-compose.yml down",
+    "db:init": "pnpm --filter @marketplace/local-api db:init",
+    "db:seed": "pnpm --filter @marketplace/local-api db:seed",
+    "dev:api": "pnpm --filter @marketplace/local-api dev",
+    "dev:web": "pnpm --filter @marketplace/web dev",
+    "local:up": "pnpm db:init && pnpm db:seed && concurrently -n api,web -c blue,green \"pnpm dev:api\" \"pnpm dev:web\"",
+    "local:docker": "pnpm docker:up && pnpm local:up",
+    "local:up:jar": "pnpm local:up",
+    "dev:lite": "concurrently -n api,web -c blue,green \"pnpm dev:api\" \"pnpm dev:web\"",
+    "typecheck": "pnpm --filter @marketplace/local-api typecheck && pnpm --filter @marketplace/web typecheck",
+    "build:web": "pnpm --filter @marketplace/web build",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "tf:fmt": "terraform fmt -recursive infra/terraform",
+    "tf:init:staging": "terraform -chdir=infra/terraform/envs/staging init -backend-config=../../state/backend-staging.hcl",
+    "tf:init:prod": "terraform -chdir=infra/terraform/envs/prod init -backend-config=../../state/backend-prod.hcl",
+    "tf:init:staging:local": "terraform -chdir=infra/terraform/envs/staging init -backend=false",
+    "tf:init:prod:local": "terraform -chdir=infra/terraform/envs/prod init -backend=false",
+    "tf:validate:staging": "terraform -chdir=infra/terraform/envs/staging validate",
+    "tf:validate:prod": "terraform -chdir=infra/terraform/envs/prod validate"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.16.0",
+    "concurrently": "^9.1.0",
+    "eslint": "^9.16.0",
+    "eslint-plugin-react-hooks": "^5.1.0",
+    "eslint-plugin-react-refresh": "^0.4.16",
+    "globals": "^15.13.0",
+    "prettier": "^3.4.2",
+    "typescript-eslint": "^8.18.0"
+  }
+}
